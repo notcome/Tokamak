@@ -82,3 +82,9 @@ public extension _PaddingLayout {
     })
   }
 }
+
+extension _PaddingLayout: LayoutModifier {
+    public func toLayout() -> some Layout {
+        PaddingLayout(edges: edges, insets: insets)
+    }
+}

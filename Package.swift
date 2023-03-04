@@ -43,6 +43,10 @@ let package = Package(
       name: "TokamakStaticHTMLBenchmark",
       targets: ["TokamakStaticHTMLBenchmark"]
     ),
+    .library(
+        name: "TokamakCocoa",
+        targets: ["TokamakCocoa"]
+    ),
   ],
   dependencies: [
     .package(
@@ -229,6 +233,12 @@ let package = Package(
         ),
       ],
       exclude: ["__Snapshots__", "RenderingTests/__Snapshots__"]
+    ),
+    .target(
+        name: "TokamakCocoa",
+        dependencies: [
+            "TokamakCore",
+        ]
     ),
   ]
 )
