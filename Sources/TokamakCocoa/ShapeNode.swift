@@ -38,36 +38,39 @@ final class ShapeViewNode: ViewNode {
     fileprivate init(repn: Repn) {
         self.repn = repn
         super.init()
-        uiView!.layer.addSublayer(shapeLayer)
-        shapeLayer.frame = .zero
-        update()
     }
 
+    private var cgPath: CGPath = .init(rect: .zero, transform: nil)
     private var cgColor: CGColor {
         let r = _ColorProxy(repn.color).resolve(in: .defaultEnvironment)
         return CGColor(srgbRed: r.red, green: r.green, blue: r.blue, alpha: r.opacity)
     }
 
-    override func update() {
-        layout()
-        shapeLayer.fillColor = cgColor
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        repn.shape.sizeThatFits(proposal)
     }
 
-    override func layout() {
-        actualViewSize = proposedViewSize
-        let cgPath = repn.makePath(bounds).cgPath
-        shapeLayer.path = cgPath
-        shapeLayer.frame = bounds
+    override func placeSubviews(_ proposal: ProposedViewSize) {
+        size = repn.shape.sizeThatFits(proposal)
+        cgPath = repn.shape.path(in: .init(origin: .zero, size: size)).cgPath
+    }
+
+    override func generateOutput() -> Element {
+        var shapeElement = ShapeElement(id: ObjectIdentifier(self))
+        shapeElement.size = size
+        shapeElement.path = cgPath
+        shapeElement.color = cgColor
+        return shapeElement.untyped
     }
 }
 
 private extension ShapeViewNode {
     struct Repn: View, PrimitiveViewNodeConvertible {
-        var makePath: (CGRect) -> Path
+        var shape: any Shape
         var color: Color
 
         var body: Never {
-            neverBody("ShapeTarget.Repn")
+            neverBody("ShapeViewNode.Repn")
         }
 
         func createViewNode() -> ViewNode {
@@ -79,7 +82,7 @@ private extension ShapeViewNode {
 extension _ShapeView: CocoaPrimitive {
     var renderedBody: AnyView {
         let color = (style as? Color) ?? foregroundColor ?? Color.black
-        let repn = ShapeViewNode.Repn(makePath: shape.path(in:), color: color)
+        let repn = ShapeViewNode.Repn(shape: shape, color: color)
         return AnyView(repn)
     }
 }

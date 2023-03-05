@@ -4,52 +4,49 @@ import UIKit
 class ViewNode: Target {
     weak var parent: ViewNode?
     var children: [ViewNode] = []
+    var childrenOrigins: [CGPoint] = []
     var view: AnyView = AnyView(EmptyView())
+    var proposal: ProposedViewSize = .zero
+    var cachedFittingSize: (ProposedViewSize, CGSize)?
+    var size: CGSize = .zero
 
-    var proposedViewSize: CGSize = .zero
-    var actualViewSize: CGSize = .zero
-    var origin: CGPoint = .zero
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        var w: CGFloat = 0
+        var h: CGFloat = 0
 
-    var frame: CGRect {
-        .init(origin: origin, size: actualViewSize)
-    }
-    var bounds: CGRect {
-        .init(origin: .zero, size: actualViewSize)
-    }
-
-    class var hasUIView: Bool {
-        true
-    }
-
-    private var _uiView: UIView!
-    func loadUIView() -> UIView {
-        UIView()
-    }
-
-    var uiView: UIView? {
-        guard Self.hasUIView else { return nil }
-        if _uiView == nil {
-            _uiView = loadUIView()
+        for child in children {
+            let childSize = child.getFittingSize(proposal)
+            w = max(childSize.width, w)
+            h = max(childSize.height, h)
         }
-        return _uiView
+
+        return .init(width: w, height: h)
     }
 
-    func update() {}
+    func placeSubviews(_ proposal: ProposedViewSize) {
+        var w: CGFloat = 0
+        var h: CGFloat = 0
 
-    func layout() {
-        fatalError()
-    }
-
-    func layoutSubviews() {
-        guard !children.isEmpty else { return }
-        fatalError()
-    }
-
-    var closestUIView: UIView {
-        if let uiView {
-            return uiView
+        for child in children {
+            child.layout(proposal)
+            w = max(child.size.width, w)
+            h = max(child.size.height, h)
         }
-        return parent!.closestUIView
+
+        childrenOrigins = []
+        for child in children {
+            let x = (child.size.width - w) / 2
+            let y = (child.size.height - h) / 2
+            childrenOrigins.append(.init(x: x, y: y))
+        }
+    }
+
+    var needsLayout: Bool = false
+    func setNeedsLayout() {
+        guard !needsLayout else { return }
+        needsLayout = true
+        cachedFittingSize = nil
+        parent?.setNeedsLayout()
     }
 
     func addChild(_ child: ViewNode, before sibling: ViewNode?) {
@@ -57,75 +54,40 @@ class ViewNode: Target {
         if let sibling {
             siblingIndex = children.firstIndex { $0 === sibling }!
         }
-
-        if let childUIView = child.uiView {
-            attach(childUIView, before: siblingIndex)
-        }
-
         children.insert(child, at: siblingIndex)
-        layout(child: child)
+        child.parent = self
+        setNeedsLayout()
     }
 
-    private func attach(_ childUIView: UIView, before siblingIndex: Int) {
-        guard let uiView else {
-            let uiView = closestUIView
-            guard uiView.subviews.isEmpty else {
-                fatalError("We do not support such a complicated case")
-            }
-            uiView.addSubview(childUIView)
-            return
+    final func getFittingSize(_ proposal: ProposedViewSize) -> CGSize {
+        if let (cachedProposal, cachedResult) = cachedFittingSize,
+           proposal == cachedProposal
+        {
+            return cachedResult
         }
-
-        for i in siblingIndex..<children.count {
-            let sibling = children[i]
-            if let siblingUIView = sibling.uiView {
-                uiView.insertSubview(childUIView, belowSubview: siblingUIView)
-            }
-            if let descendant = sibling.firstDescendantWithUIView {
-                uiView.insertSubview(childUIView, belowSubview: descendant.uiView!)
-            }
-        }
-        uiView.addSubview(childUIView)
+        let result = sizeThatFits(proposal)
+        cachedFittingSize = (proposal, result)
+        return result
     }
 
-    private func layout(child: ViewNode) {
-        child.proposedViewSize = frame.size
-        child.layout()
-        let w = child.actualViewSize.width
-        let h = child.actualViewSize.height
-
-        let x = (actualViewSize.width - w) / 2
-        let y = (actualViewSize.height - h) / 2
-        child.origin = .init(x: x, y: y)
-
-        guard let childUIView = child.uiView else { return }
-        childUIView.frame.size = .init(width: w, height: h)
-        guard let superview = childUIView.superview else { return }
-
-        var parent = self
-        var dx = x
-        var dy = y
-        while true {
-            if parent.uiView == superview {
-                childUIView.frame.origin = .init(x: dx, y: dy)
-                return
-            }
-            dx += parent.origin.x
-            dy += parent.origin.y
-            parent = parent.parent!
-        }
+    final func layout(_ proposal: ProposedViewSize) {
+        guard proposal != self.proposal || needsLayout else { return }
+        needsLayout = false
+        self.proposal = proposal
+        size = getFittingSize(proposal)
+        placeSubviews(proposal)
     }
 
-    var firstDescendantWithUIView: ViewNode? {
-        for child in children {
-            if child.uiView != nil {
-                return child
-            }
-            if let descendant = child.firstDescendantWithUIView {
-                return descendant
-            }
+    func generateOutput() -> Element {
+        var element = Element(id: ObjectIdentifier(self))
+        element.size = size
+        element.children = zip(children, childrenOrigins).map { (child, origin) in
+            var childElement = child.generateOutput()
+            childElement.origin.x += origin.x
+            childElement.origin.y += origin.y
+            return childElement
         }
-        return nil
+        return element
     }
 }
 

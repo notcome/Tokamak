@@ -10,11 +10,15 @@ extension EnvironmentValues {
     }
 }
 
-//extension ModifiedContent: CocoaPrimitive where Content: View, Modifier == _FrameLayout {
-//    var renderedBody: AnyView {
-//        AnyView(content.environment(\.colorScheme, .dark))
-//    }
-//}
+extension ModifiedContent: CocoaPrimitive where Content: View, Modifier == _PaddingLayout {
+    var renderedBody: AnyView {
+        let repn = PaddingViewNode.Repn(
+            edges: modifier.edges,
+            insets: modifier.insets,
+            content: AnyView(content))
+        return AnyView(repn)
+    }
+}
 
 final class CocoaRenderer: Renderer {
     typealias TargetType = ViewNode
@@ -34,7 +38,7 @@ final class CocoaRenderer: Renderer {
     }
 
     func update(target: ViewNode, with host: MountedHost) {
-        target.update()
+        target.setNeedsLayout()
     }
 
     func unmount(target: ViewNode, from parent: ViewNode, with task: UnmountHostTask<CocoaRenderer>) {
@@ -50,40 +54,8 @@ final class CocoaRenderer: Renderer {
     }
 }
 
-
-final class RootViewNode: ViewNode {
-    override func layout() {
-        layoutSubviews()
-    }
-
-    override func layoutSubviews() {
-        for child in children {
-            child.proposedViewSize = proposedViewSize
-            child.layout()
-        }
-
-        let w = children.map(\.actualViewSize.width).max() ?? 0
-        let h = children.map(\.actualViewSize.height).reduce(0, +)
-        var currentY: CGFloat = 0
-
-
-        for child in children {
-            child.origin = .init(x: 0, y: currentY)
-            currentY += child.actualViewSize.height
-            child.uiView?.frame = child.frame
-        }
-
-        actualViewSize = .init(width: w, height: h)
-
-        let x = (proposedViewSize.width - w) / 2
-        let y = (proposedViewSize.height - h) / 2
-        origin = .init(x: x, y: y)
-        uiView!.frame = .init(x: x, y: y, width: w, height: h)
-    }
-}
-
 public final class DemoView<Root: View>: UIView {
-    private var rootNode = RootViewNode()
+    private var rootNode = ViewNode()
     private var renderer = CocoaRenderer()
     private var reconciler: StackReconciler<CocoaRenderer>!
 
@@ -95,24 +67,41 @@ public final class DemoView<Root: View>: UIView {
 
     public func mount(_ root: Root) {
         precondition(reconciler == nil)
-        addSubview(rootNode.uiView!)
 
         reconciler = StackReconciler(
             view: root,
             target: rootNode,
             environment: .defaultEnvironment,
             renderer: renderer
-        ) { next in
-            print("before execute next")
+        ) { [weak self] next in
             DispatchQueue.main.async {
-                print("now execute next")
+                guard let self else { return }
                 next()
+                self.rootNode.layout(self.rootNode.proposal)
+                self.repopulate()
             }
         }
+        self.rootNode.layout(.init(bounds.size))
+        self.repopulate()
     }
 
     public override func layoutSubviews() {
-        rootNode.proposedViewSize = bounds.size
-        rootNode.layout()
+        rootNode.layout(.init(bounds.size))
+        repopulate()
+    }
+
+    func repopulate() {
+        let output = rootNode.generateOutput()
+        let view = buildView(from: output)
+
+        for subview in subviews {
+            subview.removeFromSuperview()
+        }
+
+        addSubview(view)
+
+        let x = (frame.size.width - view.frame.size.width) / 2
+        let y = (frame.size.height - view.frame.size.height) / 2
+        view.frame.origin = .init(x: x, y: y)
     }
 }
